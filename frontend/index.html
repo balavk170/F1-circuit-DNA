@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F1 APEX — Analytics Dashboard</title>
+
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<!-- Tailwind CSS (CDN — replace with PostCSS build for production) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          orbitron: ["'Orbitron'", 'sans-serif'],
+          rajdhani: ["'Rajdhani'", 'sans-serif'],
+          mono:     ["'Share Tech Mono'", 'monospace'],
+        },
+        colors: {
+          f1red:'#e10600', neon:'#00f5ff', nyellow:'#f5e642',
+          ngreen:'#39ff14', npink:'#ff0090', norange:'#ff6b00',
+          npurple:'#bf5fff', bg0:'#03030a', bg1:'#06060e', bg2:'#0a0a18', bg3:'#0d0d22',
+        },
+      },
+    },
+  };
+</script>
+
+<!-- Three.js, GSAP, Chart.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- React 18 (CDN) -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<!-- Babel for JSX transpilation (replace with Vite/CRA build in production) -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+/* ── Design tokens ──────────────────────────────────────────────────────── */
+:root{
+  --f1r:#e10600;--nc:#00f5ff;--ny:#f5e642;--ng:#39ff14;
+  --np:#ff0090;--no:#ff6b00;--npu:#bf5fff;--nw:#ffffff;
+  --bg0:#03030a;--bg1:#06060e;--bg2:#0a0a18;--bg3:#0d0d22;
+  --glass:rgba(0,245,255,.04);--glassborder:rgba(0,245,255,.12);
+  --card:rgba(6,6,20,.92);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;overflow-x:hidden;}
+body{background:var(--bg0);color:var(--nw);font-family:'Rajdhani',sans-serif;cursor:none;overflow-x:hidden;}
+
+/* ── Cursor ─────────────────────────────────────────────────────────────── */
+#cursor-glow{position:fixed;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(0,245,255,.07) 0%,transparent 70%);pointer-events:none;z-index:9999;transform:translate(-50%,-50%);transition:opacity .3s;}
+#cursor-dot{position:fixed;width:8px;height:8px;border-radius:50%;background:var(--nc);pointer-events:none;z-index:10000;transform:translate(-50%,-50%);box-shadow:0 0 12px var(--nc);}
+
+/* ── Loader ─────────────────────────────────────────────────────────────── */
+#loader{position:fixed;inset:0;background:var(--bg0);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;transition:opacity .7s,visibility .7s;}
+#loader.hide{opacity:0;visibility:hidden;pointer-events:none;}
+.loader-logo{font-family:'Orbitron',sans-serif;font-size:clamp(28px,6vw,60px);font-weight:900;letter-spacing:.2em;color:var(--f1r);text-shadow:0 0 40px var(--f1r);}
+.loader-logo span{color:var(--nc);}
+.loader-bar{width:280px;height:2px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;}
+.loader-fill{height:100%;background:linear-gradient(90deg,var(--f1r),var(--nc));width:0;border-radius:2px;transition:width .1s linear;}
+.loader-status{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--nc);opacity:.7;letter-spacing:.12em;}
+
+/* ── Nav ────────────────────────────────────────────────────────────────── */
+/*
+  BUG FIX 1 — Nav layout:
+  The old design had #live-clock as a separate fixed element (top:18px right:24px)
+  which sat on top of the circuit-selector buttons in the nav.
+  Fix: remove the standalone #live-clock. The clock is now rendered as the
+  rightmost flex child INSIDE <nav>, so it always flows to the right of the
+  circuit buttons with natural flex spacing. No overlap possible.
+*/
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:900;
+  background:rgba(3,3,10,.88);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--glassborder);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 32px;gap:12px;          /* gap prevents items touching */
+}
+.nav-logo{font-family:'Orbitron',sans-serif;font-size:18px;font-weight:900;color:var(--f1r);letter-spacing:.15em;text-shadow:0 0 20px rgba(225,6,0,.5);flex-shrink:0;}
+.nav-logo span{color:var(--nc);}
+.nav-links{display:flex;gap:24px;list-style:none;flex-shrink:0;}
+.nav-links a{font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:600;color:rgba(255,255,255,.45);text-decoration:none;letter-spacing:.1em;text-transform:uppercase;transition:color .2s;}
+.nav-links a:hover{color:var(--nc);}
+.circuit-selector{display:flex;gap:6px;align-items:center;flex-wrap:nowrap;}
+.circuit-btn{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);padding:5px 11px;border-radius:3px;cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:.06em;transition:all .2s;text-transform:uppercase;white-space:nowrap;}
+.circuit-btn.active,.circuit-btn:hover{background:rgba(0,245,255,.1);border-color:var(--nc);color:var(--nc);}
+
+/* ── Hero ───────────────────────────────────────────────────────────────── */
+#hero{position:relative;height:100vh;overflow:hidden;display:flex;align-items:center;justify-content:center;}
+#hero-canvas{position:absolute;inset:0;width:100%;height:100%;}
+.hero-ui{position:absolute;inset:0;pointer-events:none;z-index:10;display:flex;flex-direction:column;justify-content:space-between;padding:80px 40px 40px;}
+.hero-title{font-family:'Orbitron',sans-serif;font-size:clamp(28px,4.5vw,68px);font-weight:900;line-height:1;letter-spacing:-.02em;}
+.hero-title .t1{display:block;color:var(--nw);text-shadow:0 0 60px rgba(255,255,255,.12);}
+.hero-title .t2{display:block;color:var(--f1r);text-shadow:0 0 40px rgba(225,6,0,.55);}
+.hero-title .t3{display:block;color:var(--nc);text-shadow:0 0 30px rgba(0,245,255,.45);font-size:.52em;font-weight:400;letter-spacing:.28em;margin-top:10px;}
+.hero-stats{display:flex;gap:28px;}
+.hstat{display:flex;flex-direction:column;gap:3px;}
+.hstat-val{font-family:'Orbitron',sans-serif;font-size:clamp(18px,2.2vw,30px);font-weight:700;color:var(--nc);}
+.hstat-lbl{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.14em;}
+.speed-legend{position:absolute;bottom:48px;right:40px;display:flex;flex-direction:column;gap:4px;align-items:flex-end;}
+.speed-grad-bar{width:110px;height:7px;border-radius:4px;background:linear-gradient(90deg,#0044ff,#00ff88,#ffff00,#ff4400);}
+.speed-grad-labels{display:flex;justify-content:space-between;width:110px;}
+.speed-grad-labels span{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,.38);}
+
+/* Hero controls */
+#hero-controls-hint{position:absolute;bottom:110px;left:50%;transform:translateX(-50%);z-index:20;display:flex;gap:14px;pointer-events:none;animation:fadeHint 4s ease 2s forwards;opacity:1;}
+@keyframes fadeHint{0%{opacity:1;}80%{opacity:1;}100%{opacity:0;}}
+.hint-pill{background:rgba(0,0,0,.65);border:1px solid rgba(0,245,255,.2);border-radius:30px;padding:5px 14px;font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,255,255,.6);letter-spacing:.08em;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px);}
+.hint-pill .hint-icon{color:var(--nc);font-size:13px;}
+#hero-controls-badge{position:absolute;top:80px;right:40px;z-index:20;background:rgba(0,0,0,.55);border:1px solid rgba(0,245,255,.15);border-radius:8px;padding:10px 14px;pointer-events:none;backdrop-filter:blur(14px);}
+.ctrl-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+.ctrl-row:last-child{margin-bottom:0;}
+.ctrl-key{background:rgba(0,245,255,.1);border:1px solid rgba(0,245,255,.25);border-radius:4px;padding:2px 7px;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--nc);letter-spacing:.06em;}
+.ctrl-desc{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,.4);letter-spacing:.06em;}
+
+/* ── Toggle panel ───────────────────────────────────────────────────────── */
+#toggle-panel{
+  position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:800;
+  display:flex;flex-direction:column;gap:4px;padding:10px 7px;
+  background:rgba(3,3,10,.92);backdrop-filter:blur(20px);
+  border-left:1px solid var(--glassborder);border-radius:8px 0 0 8px;
+}
+.tog-btn{width:34px;height:30px;border-radius:3px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.38);cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:.04em;}
+.tog-btn.active{background:rgba(0,245,255,.1);border-color:var(--nc);color:var(--nc);}
+.tog-btn:hover{border-color:rgba(0,245,255,.4);color:var(--nc);}
+
+/* ── Charts ─────────────────────────────────────────────────────────────── */
+/*
+  BUG FIX 3 — Chart selector / toggle panel overlap:
+  #charts-section and #ml-section now have padding-right:72px applied via
+  inline style in React, so no chart card edge reaches behind the 50px-wide
+  fixed toggle panel on the right side of the viewport.
+*/
+#charts-section{
+  position:relative;
+  padding:100px 36px 70px;
+  /* right padding is set inline in the React component (72px) */
+  max-width:1580px;margin:0 auto;
+}
+.section-header{margin-bottom:52px;text-align:center;}
+.section-tag{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--nc);letter-spacing:.22em;text-transform:uppercase;opacity:.65;}
+.section-title{font-family:'Orbitron',sans-serif;font-size:clamp(22px,3vw,40px);font-weight:700;margin-top:8px;}
+.charts-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px;}
+.chart-card{background:var(--card);border:1px solid var(--glassborder);border-radius:8px;padding:22px;position:relative;overflow:hidden;transition:border-color .3s,box-shadow .3s;transform-style:preserve-3d;}
+.chart-card:hover{border-color:rgba(0,245,255,.28);box-shadow:0 0 36px rgba(0,245,255,.07),inset 0 0 36px rgba(0,245,255,.02);}
+.chart-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,245,255,.025),transparent 55%);pointer-events:none;}
+.cc{position:absolute;width:11px;height:11px;opacity:.35;}
+.cc.tl{top:7px;left:7px;border-top:1px solid var(--nc);border-left:1px solid var(--nc);}
+.cc.tr{top:7px;right:7px;border-top:1px solid var(--nc);border-right:1px solid var(--nc);}
+.cc.bl{bottom:7px;left:7px;border-bottom:1px solid var(--nc);border-left:1px solid var(--nc);}
+.cc.br{bottom:7px;right:7px;border-bottom:1px solid var(--nc);border-right:1px solid var(--nc);}
+.card-label{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--nc);letter-spacing:.18em;opacity:.55;margin-bottom:4px;}
+.card-title{font-family:'Orbitron',sans-serif;font-size:13px;font-weight:600;margin-bottom:14px;color:var(--nw);}
+.span-12{grid-column:span 12;}
+.span-8{grid-column:span 8;}
+.span-6{grid-column:span 6;}
+.span-5{grid-column:span 5;}
+.span-7{grid-column:span 7;}
+.span-4{grid-column:span 4;}
+.span-3{grid-column:span 3;}
+canvas.chart-canvas{width:100%!important;max-height:240px;}
+
+/* Tyre layout */
+#tyre-layout{display:flex;gap:16px;align-items:center;min-height:190px;}
+#tyre-canvas{flex-shrink:0;display:block;}
+#tyre-strat-wrap{flex:1;min-width:0;height:190px;position:relative;}
+
+/* Heatmap */
+.heatmap-grid{display:grid;gap:5px;grid-template-columns:90px repeat(5,1fr);font-family:'Share Tech Mono',monospace;}
+.hm-cell{height:68px;display:flex;align-items:center;justify-content:center;border-radius:5px;font-size:18px;font-weight:700;letter-spacing:.04em;transition:transform .18s,box-shadow .18s;position:relative;}
+.hm-cell:hover{transform:scale(1.04);z-index:10;box-shadow:0 0 18px rgba(0,0,0,.6);}
+.hm-label{color:rgba(255,255,255,.55);justify-content:flex-end;padding-right:10px;background:transparent!important;font-size:13px;font-weight:700;letter-spacing:.12em;}
+.hm-header{color:rgba(255,255,255,.45);background:transparent!important;font-size:11px;letter-spacing:.1em;font-weight:600;height:36px!important;}
+
+/* Prediction */
+.pred-list{display:flex;flex-direction:column;gap:7px;}
+.pred-item{display:flex;align-items:center;gap:10px;padding:9px 13px;border-radius:5px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.055);transition:all .2s;}
+.pred-item:hover{background:rgba(0,245,255,.04);border-color:rgba(0,245,255,.14);}
+.pred-pos{font-family:'Orbitron',sans-serif;font-size:18px;font-weight:700;width:32px;text-align:center;flex-shrink:0;}
+.pred-pos.p1{color:var(--ny);}
+.pred-pos.p2{color:rgba(255,255,255,.68);}
+.pred-pos.p3{color:var(--no);}
+.pred-driver{flex:1;}
+.pred-name{font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:600;}
+.pred-team{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.06em;}
+.pred-bar-wrap{flex:1;height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;}
+.pred-bar{height:100%;border-radius:3px;transition:width 1.2s cubic-bezier(.23,1,.32,1);}
+.pred-pct{font-family:'Orbitron',sans-serif;font-size:12px;font-weight:700;width:44px;text-align:right;flex-shrink:0;}
+
+/* ML Controls */
+.ml-controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center;}
+.ml-select{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.1);color:var(--nw);padding:6px 11px;border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:11px;cursor:pointer;outline:none;}
+.ml-select:focus{border-color:var(--nc);}
+.algo-btn{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.45);padding:5px 10px;border-radius:3px;font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;transition:all .2s;}
+.algo-btn.active{background:rgba(245,230,66,.1);border-color:var(--ny);color:var(--ny);}
+.ml-btn{background:rgba(0,245,255,.1);border:1px solid var(--nc);color:var(--nc);padding:6px 18px;border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:11px;cursor:pointer;transition:all .2s;letter-spacing:.07em;}
+.ml-btn:hover{background:rgba(0,245,255,.2);}
+
+/* Compound buttons */
+.compound-btn{padding:3px 9px;border-radius:3px;font-family:'Share Tech Mono',monospace;font-size:9px;cursor:pointer;border:1px solid;transition:all .2s;opacity:.6;}
+.compound-btn.active{opacity:1;}
+
+/* Footer */
+footer{border-top:1px solid var(--glassborder);padding:28px 40px;display:flex;justify-content:space-between;align-items:center;background:rgba(3,3,10,.8);}
+.footer-logo{font-family:'Orbitron',sans-serif;font-size:15px;font-weight:700;color:var(--f1r);letter-spacing:.15em;}
+.footer-logo span{color:var(--nc);}
+
+/* Data stream */
+#data-stream{position:fixed;right:48px;top:0;bottom:0;width:1px;background:linear-gradient(180deg,transparent,rgba(0,245,255,.25),transparent);pointer-events:none;z-index:50;opacity:.25;animation:streamScroll 5s linear infinite;}
+@keyframes streamScroll{from{background-position:0 -100vh;}to{background-position:0 100vh;}}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg0);}
+::-webkit-scrollbar-thumb{background:var(--f1r);border-radius:2px;}
+
+/* Responsive */
+@media(max-width:1100px){.span-4{grid-column:span 6;}.span-3{grid-column:span 6;}.span-8{grid-column:span 12;}.span-6{grid-column:span 12;}.span-5{grid-column:span 12;}.span-7{grid-column:span 12;}}
+@media(max-width:700px){.span-4,.span-3,.span-6,.span-8,.span-12,.span-5,.span-7{grid-column:span 12;}#toggle-panel{display:none;}.circuit-selector{display:none;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ── Data + utility modules (loaded before React components) ───────────── -->
+<script type="text/babel" src="src/data/circuits.js"></script>
+<script type="text/babel" src="src/utils/chartHelpers.js"></script>
+<script type="text/babel" src="src/utils/threeHelpers.js"></script>
+
+<!-- ── React components ─────────────────────────────────────────────────── -->
+<script type="text/babel" src="src/components/Loader.jsx"></script>
+<script type="text/babel" src="src/components/Navbar.jsx"></script>
+<script type="text/babel" src="src/components/Hero.jsx"></script>
+<script type="text/babel" src="src/components/ChartsSection.jsx"></script>
+<script type="text/babel" src="src/components/MLSection.jsx"></script>
+<script type="text/babel" src="src/App.jsx"></script>
+
+<!-- ── Mount ────────────────────────────────────────────────────────────── -->
+<script type="text/babel">
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F1 APEX — Analytics Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<!-- Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme:{extend:{
+      fontFamily:{orbitron:["'Orbitron'"],rajdhani:["'Rajdhani'"],mono:["'Share Tech Mono'"]},
+      colors:{f1red:'#e10600',neon:'#00f5ff',nyellow:'#f5e642',ngreen:'#39ff14',npink:'#ff0090',norange:'#ff6b00',npurple:'#bf5fff'},
+    }},
+  };
+</script>
+
+<!-- Three.js, GSAP, Chart.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- React 18 -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+:root{
+  --f1r:#e10600;--nc:#00f5ff;--ny:#f5e642;--ng:#39ff14;
+  --np:#ff0090;--no:#ff6b00;--npu:#bf5fff;--nw:#ffffff;
+  --bg0:#03030a;--bg1:#06060e;--bg2:#0a0a18;--bg3:#0d0d22;
+  --glass:rgba(0,245,255,.04);--glassborder:rgba(0,245,255,.12);
+  --card:rgba(6,6,20,.92);
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;overflow-x:hidden;}
+body{background:var(--bg0);color:var(--nw);font-family:'Rajdhani',sans-serif;cursor:none;overflow-x:hidden;}
+
+#cursor-glow{position:fixed;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(0,245,255,.07) 0%,transparent 70%);pointer-events:none;z-index:9999;transform:translate(-50%,-50%);transition:opacity .3s;}
+#cursor-dot{position:fixed;width:8px;height:8px;border-radius:50%;background:var(--nc);pointer-events:none;z-index:10000;transform:translate(-50%,-50%);box-shadow:0 0 12px var(--nc);}
+
+#loader{position:fixed;inset:0;background:var(--bg0);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;transition:opacity .7s,visibility .7s;}
+#loader.hide{opacity:0;visibility:hidden;pointer-events:none;}
+.loader-logo{font-family:'Orbitron',sans-serif;font-size:clamp(28px,6vw,60px);font-weight:900;letter-spacing:.2em;color:var(--f1r);text-shadow:0 0 40px var(--f1r);}
+.loader-logo span{color:var(--nc);}
+.loader-bar{width:280px;height:2px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;}
+.loader-fill{height:100%;background:linear-gradient(90deg,var(--f1r),var(--nc));width:0;border-radius:2px;}
+.loader-status{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--nc);opacity:.7;letter-spacing:.12em;}
+
+/*
+  ── FIX 1: Nav clock ──────────────────────────────────────────────────────
+  Old design had a separate fixed #live-clock at top:18px right:24px that
+  visually overlapped the circuit-selector buttons in the nav.
+  Fix: remove the standalone element; clock is now a flex sibling inside <nav>
+  and always appears to the right of the buttons with natural flex flow.
+  No z-index conflict, no positional overlap possible.
+*/
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:900;
+  background:rgba(3,3,10,.88);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--glassborder);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 24px;gap:14px;
+}
+.nav-logo{font-family:'Orbitron',sans-serif;font-size:18px;font-weight:900;color:var(--f1r);letter-spacing:.15em;text-shadow:0 0 20px rgba(225,6,0,.5);flex-shrink:0;}
+.nav-logo span{color:var(--nc);}
+.nav-links{display:flex;gap:24px;list-style:none;flex-shrink:0;}
+.nav-links a{font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:600;color:rgba(255,255,255,.45);text-decoration:none;letter-spacing:.1em;text-transform:uppercase;transition:color .2s;}
+.nav-links a:hover{color:var(--nc);}
+.circuit-selector{display:flex;gap:6px;align-items:center;flex-wrap:nowrap;}
+.circuit-btn{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);padding:5px 11px;border-radius:3px;cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:.06em;transition:all .2s;text-transform:uppercase;white-space:nowrap;}
+.circuit-btn.active,.circuit-btn:hover{background:rgba(0,245,255,.1);border-color:var(--nc);color:var(--nc);}
+/* Clock is a plain flex child — no fixed positioning needed */
+.nav-clock{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--nc);opacity:.65;letter-spacing:.1em;white-space:nowrap;flex-shrink:0;}
+
+#hero{position:relative;height:100vh;overflow:hidden;display:flex;align-items:center;justify-content:center;}
+#hero-canvas{position:absolute;inset:0;width:100%;height:100%;}
+.hero-ui{position:absolute;inset:0;pointer-events:none;z-index:10;display:flex;flex-direction:column;justify-content:space-between;padding:80px 40px 40px;}
+.hero-title{font-family:'Orbitron',sans-serif;font-size:clamp(28px,4.5vw,68px);font-weight:900;line-height:1;letter-spacing:-.02em;}
+.hero-title .t1{display:block;color:var(--nw);text-shadow:0 0 60px rgba(255,255,255,.12);}
+.hero-title .t2{display:block;color:var(--f1r);text-shadow:0 0 40px rgba(225,6,0,.55);}
+.hero-title .t3{display:block;color:var(--nc);text-shadow:0 0 30px rgba(0,245,255,.45);font-size:.52em;font-weight:400;letter-spacing:.28em;margin-top:10px;}
+.hero-stats{display:flex;gap:28px;}
+.hstat{display:flex;flex-direction:column;gap:3px;}
+.hstat-val{font-family:'Orbitron',sans-serif;font-size:clamp(18px,2.2vw,30px);font-weight:700;color:var(--nc);}
+.hstat-lbl{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.14em;}
+.speed-legend{position:absolute;bottom:48px;right:40px;display:flex;flex-direction:column;gap:4px;align-items:flex-end;}
+.speed-grad-bar{width:110px;height:7px;border-radius:4px;background:linear-gradient(90deg,#0044ff,#00ff88,#ffff00,#ff4400);}
+.speed-grad-labels{display:flex;justify-content:space-between;width:110px;}
+.speed-grad-labels span{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,.38);}
+#hero-controls-hint{position:absolute;bottom:110px;left:50%;transform:translateX(-50%);z-index:20;display:flex;gap:14px;pointer-events:none;animation:fadeHint 4s ease 2s forwards;opacity:1;}
+@keyframes fadeHint{0%{opacity:1;}80%{opacity:1;}100%{opacity:0;}}
+.hint-pill{background:rgba(0,0,0,.65);border:1px solid rgba(0,245,255,.2);border-radius:30px;padding:5px 14px;font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,255,255,.6);letter-spacing:.08em;display:flex;align-items:center;gap:6px;backdrop-filter:blur(10px);}
+.hint-pill .hint-icon{color:var(--nc);font-size:13px;}
+#hero-controls-badge{position:absolute;top:80px;right:40px;z-index:20;background:rgba(0,0,0,.55);border:1px solid rgba(0,245,255,.15);border-radius:8px;padding:10px 14px;pointer-events:none;backdrop-filter:blur(14px);}
+.ctrl-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+.ctrl-row:last-child{margin-bottom:0;}
+.ctrl-key{background:rgba(0,245,255,.1);border:1px solid rgba(0,245,255,.25);border-radius:4px;padding:2px 7px;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--nc);letter-spacing:.06em;}
+.ctrl-desc{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,.4);letter-spacing:.06em;}
+
+#toggle-panel{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:800;display:flex;flex-direction:column;gap:4px;padding:10px 7px;background:rgba(3,3,10,.92);backdrop-filter:blur(20px);border-left:1px solid var(--glassborder);border-radius:8px 0 0 8px;}
+.tog-btn{width:34px;height:30px;border-radius:3px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.38);cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:.04em;}
+.tog-btn.active{background:rgba(0,245,255,.1);border-color:var(--nc);color:var(--nc);}
+.tog-btn:hover{border-color:rgba(0,245,255,.4);color:var(--nc);}
+
+/*
+  ── FIX 3: Chart selector / toggle panel right-margin ────────────────────
+  The fixed 50px-wide toggle panel on the right was clipping chart card edges.
+  Fix: charts section gets padding-right:72px (applied via inline style in JSX
+  so it takes precedence).  The CSS rule here is the fallback/baseline.
+*/
+#charts-section{position:relative;padding:100px 72px 70px 36px;max-width:1580px;margin:0 auto;}
+.section-header{margin-bottom:52px;text-align:center;}
+.section-tag{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--nc);letter-spacing:.22em;text-transform:uppercase;opacity:.65;}
+.section-title{font-family:'Orbitron',sans-serif;font-size:clamp(22px,3vw,40px);font-weight:700;margin-top:8px;}
+.charts-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px;}
+.chart-card{background:var(--card);border:1px solid var(--glassborder);border-radius:8px;padding:22px;position:relative;overflow:hidden;transition:border-color .3s,box-shadow .3s;transform-style:preserve-3d;}
+.chart-card:hover{border-color:rgba(0,245,255,.28);box-shadow:0 0 36px rgba(0,245,255,.07),inset 0 0 36px rgba(0,245,255,.02);}
+.chart-card.hidden{display:none;}
+.chart-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,245,255,.025),transparent 55%);pointer-events:none;}
+.cc{position:absolute;width:11px;height:11px;opacity:.35;}
+.cc.tl{top:7px;left:7px;border-top:1px solid var(--nc);border-left:1px solid var(--nc);}
+.cc.tr{top:7px;right:7px;border-top:1px solid var(--nc);border-right:1px solid var(--nc);}
+.cc.bl{bottom:7px;left:7px;border-bottom:1px solid var(--nc);border-left:1px solid var(--nc);}
+.cc.br{bottom:7px;right:7px;border-bottom:1px solid var(--nc);border-right:1px solid var(--nc);}
+.card-label{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--nc);letter-spacing:.18em;opacity:.55;margin-bottom:4px;}
+.card-title{font-family:'Orbitron',sans-serif;font-size:13px;font-weight:600;margin-bottom:14px;color:var(--nw);}
+.span-12{grid-column:span 12;}
+.span-8{grid-column:span 8;}
+.span-6{grid-column:span 6;}
+.span-5{grid-column:span 5;}
+.span-7{grid-column:span 7;}
+.span-4{grid-column:span 4;}
+.span-3{grid-column:span 3;}
+canvas.chart-canvas{width:100%!important;max-height:240px;}
+#tyre-layout{display:flex;gap:16px;align-items:center;min-height:190px;}
+#tyre-canvas{flex-shrink:0;display:block;}
+#tyre-strat-wrap{flex:1;min-width:0;height:190px;position:relative;}
+
+/*
+  ── FIX 2: 3D Heatmap — brighter HSL colour gradient ─────────────────────
+  Old code used rgb(10-45, 10-240, 10) which produced very dark, muddy cells.
+  Fix: cells are now set via hsl(hue, 95%, 48%) in buildHeatmap() in JS,
+  cycling from blue (240°) through green (120°) to red (0°) based on score.
+  The CSS here removes the old inline-background fallback so JS takes over.
+*/
+.heatmap-grid{display:grid;gap:5px;grid-template-columns:90px repeat(5,1fr);font-family:'Share Tech Mono',monospace;}
+.hm-cell{height:68px;display:flex;align-items:center;justify-content:center;border-radius:5px;font-size:18px;font-weight:700;letter-spacing:.04em;transition:transform .18s,box-shadow .18s;position:relative;}
+.hm-cell:hover{transform:scale(1.04);z-index:10;box-shadow:0 0 22px rgba(0,0,0,.7);}
+.hm-label{color:rgba(255,255,255,.55);justify-content:flex-end;padding-right:10px;background:transparent!important;font-size:13px;font-weight:700;letter-spacing:.12em;}
+.hm-header{color:rgba(255,255,255,.45);background:transparent!important;font-size:11px;letter-spacing:.1em;font-weight:600;height:36px!important;}
+
+.pred-list{display:flex;flex-direction:column;gap:7px;}
+.pred-item{display:flex;align-items:center;gap:10px;padding:9px 13px;border-radius:5px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.055);transition:all .2s;}
+.pred-item:hover{background:rgba(0,245,255,.04);border-color:rgba(0,245,255,.14);}
+.pred-pos{font-family:'Orbitron',sans-serif;font-size:18px;font-weight:700;width:32px;text-align:center;flex-shrink:0;}
+.pred-pos.p1{color:var(--ny);}
+.pred-pos.p2{color:rgba(255,255,255,.68);}
+.pred-pos.p3{color:var(--no);}
+.pred-driver{flex:1;}
+.pred-name{font-family:'Rajdhani',sans-serif;font-size:14px;font-weight:600;}
+.pred-team{font-family:'Share Tech Mono',monospace;font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.06em;}
+.pred-bar-wrap{flex:1;height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;}
+.pred-bar{height:100%;border-radius:3px;transition:width 1.2s cubic-bezier(.23,1,.32,1);}
+.pred-pct{font-family:'Orbitron',sans-serif;font-size:12px;font-weight:700;width:44px;text-align:right;flex-shrink:0;}
+.ml-controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center;}
+.ml-select{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.1);color:var(--nw);padding:6px 11px;border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:11px;cursor:pointer;outline:none;}
+.ml-select:focus{border-color:var(--nc);}
+.algo-btn{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.45);padding:5px 10px;border-radius:3px;font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;transition:all .2s;}
+.algo-btn.active{background:rgba(245,230,66,.1);border-color:var(--ny);color:var(--ny);}
+.ml-btn{background:rgba(0,245,255,.1);border:1px solid var(--nc);color:var(--nc);padding:6px 18px;border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:11px;cursor:pointer;transition:all .2s;letter-spacing:.07em;}
+.ml-btn:hover{background:rgba(0,245,255,.2);}
+.compound-btn{padding:3px 9px;border-radius:3px;font-family:'Share Tech Mono',monospace;font-size:9px;cursor:pointer;border:1px solid;transition:all .2s;opacity:.6;}
+.compound-btn.active{opacity:1;}
+footer{border-top:1px solid var(--glassborder);padding:28px 40px;display:flex;justify-content:space-between;align-items:center;background:rgba(3,3,10,.8);}
+.footer-logo{font-family:'Orbitron',sans-serif;font-size:15px;font-weight:700;color:var(--f1r);letter-spacing:.15em;}
+.footer-logo span{color:var(--nc);}
+#data-stream{position:fixed;right:48px;top:0;bottom:0;width:1px;background:linear-gradient(180deg,transparent,rgba(0,245,255,.25),transparent);pointer-events:none;z-index:50;opacity:.25;animation:streamScroll 5s linear infinite;}
+@keyframes streamScroll{from{background-position:0 -100vh;}to{background-position:0 100vh;}}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg0);}
+::-webkit-scrollbar-thumb{background:var(--f1r);border-radius:2px;}
+@media(max-width:1100px){.span-4{grid-column:span 6;}.span-3{grid-column:span 6;}.span-8{grid-column:span 12;}.span-6{grid-column:span 12;}.span-5{grid-column:span 12;}.span-7{grid-column:span 12;}}
+@media(max-width:700px){.span-4,.span-3,.span-6,.span-8,.span-12,.span-5,.span-7{grid-column:span 12;}#toggle-panel{display:none;}.circuit-selector{display:none;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// ============================================================
+// CIRCUIT DATA (back-end module equivalent: data_generator.py)
+// ============================================================
+const CIRCUITS={
+  monaco:{name:'Circuit de Monaco',city:'Monte Carlo',length:3.337,laps:78,corners:19,topSpeed:290,drs:1,lapRecord:'1:10.166',type:'Street',
+    waypoints:[[0,0,0],[0.8,0,0.4],[1.6,0,0.9],[2.0,0,1.8],[1.8,0,2.8],[1.0,0,3.2],[0.2,0,3.0],[-0.4,0,2.4],[-0.8,0,1.6],[-0.6,0,0.8],[0,0,0]],
+    speeds:[120,180,280,160,90,140,200,170,130,160,120],
+    radar:{Speed:4,Technicality:9,DRS:2,Elevation:5,Overtaking:3,'Safety Car':8},
+    constructors:['Red Bull','Ferrari','Mercedes','McLaren','Aston Martin'],winProbs:[28,22,18,16,10],
+    drivers:['Verstappen','Leclerc','Hamilton','Norris','Alonso'],teams:['Red Bull','Ferrari','Mercedes','McLaren','Aston Martin']},
+  silverstone:{name:'Silverstone Circuit',city:'Northamptonshire',length:5.891,laps:52,corners:18,topSpeed:326,drs:2,lapRecord:'1:27.097',type:'Permanent',
+    waypoints:[[0,0,0],[1.2,0,0.3],[2.4,0,0.1],[3.2,0,0.8],[3.0,0,1.8],[2.2,0,2.4],[1.2,0,2.6],[0.3,0,2.2],[-0.3,0,1.4],[0,0,0]],
+    speeds:[310,290,180,260,230,190,280,300,200,310],
+    radar:{Speed:8,Technicality:7,DRS:5,Elevation:3,Overtaking:7,'Safety Car':5},
+    constructors:['Red Bull','Mercedes','Ferrari','McLaren','Williams'],winProbs:[30,25,20,14,8],
+    drivers:['Verstappen','Hamilton','Leclerc','Norris','Russell'],teams:['Red Bull','Mercedes','Ferrari','McLaren','Williams']},
+  monza:{name:'Autodromo di Monza',city:'Milan',length:5.793,laps:53,corners:11,topSpeed:362,drs:2,lapRecord:'1:21.046',type:'Permanent',
+    waypoints:[[0,0,0],[1.5,0,0],[3.0,0,0.2],[3.8,0,0.8],[3.5,0,1.6],[2.5,0,2.0],[1.5,0,1.8],[0.8,0,1.2],[0,0,0]],
+    speeds:[350,180,340,300,160,320,290,180,350],
+    radar:{Speed:10,Technicality:3,DRS:7,Elevation:2,Overtaking:9,'Safety Car':4},
+    constructors:['Red Bull','Ferrari','McLaren','Mercedes','AlphaTauri'],winProbs:[26,24,18,16,9],
+    drivers:['Verstappen','Leclerc','Norris','Hamilton','Gasly'],teams:['Red Bull','Ferrari','McLaren','Mercedes','AlphaTauri']},
+  spa:{name:'Spa-Francorchamps',city:'Liège',length:7.004,laps:44,corners:19,topSpeed:368,drs:2,lapRecord:'1:41.252',type:'Permanent',
+    waypoints:[[0,0,0],[0.8,0.4,0.5],[1.8,0.8,0.9],[2.6,1.2,1.4],[3.2,0.8,2.0],[3.6,0.4,2.6],[3.0,0,2.8],[2.0,0,2.4],[1.0,0,2.0],[0.2,0,1.2],[0,0,0]],
+    speeds:[320,280,200,190,340,360,240,220,300,260,320],
+    radar:{Speed:9,Technicality:7,DRS:6,Elevation:10,Overtaking:8,'Safety Car':6},
+    constructors:['Red Bull','Ferrari','Mercedes','McLaren','Alpine'],winProbs:[32,20,19,14,9],
+    drivers:['Verstappen','Leclerc','Hamilton','Norris','Ocon'],teams:['Red Bull','Ferrari','Mercedes','McLaren','Alpine']},
+  suzuka:{name:'Suzuka International Racing Course',city:'Mie Prefecture',length:5.807,laps:53,corners:18,topSpeed:326,drs:1,lapRecord:'1:30.983',type:'Permanent',
+    waypoints:[[0,0,0],[0.6,0,0.8],[1.2,0,1.6],[2.0,0,2.0],[2.8,0,1.8],[3.2,0,1.0],[3.2,0,0],[2.8,0,-0.8],[2.0,0,-1.0],[1.2,0,-0.6],[0.6,0,0],[0,0,0]],
+    speeds:[280,260,200,310,290,220,300,240,180,240,290,280],
+    radar:{Speed:7,Technicality:8,DRS:3,Elevation:4,Overtaking:5,'Safety Car':7},
+    constructors:['Red Bull','Aston Martin','Ferrari','Mercedes','McLaren'],winProbs:[35,18,18,15,8],
+    drivers:['Verstappen','Alonso','Leclerc','Hamilton','Norris'],teams:['Red Bull','Aston Martin','Ferrari','Mercedes','McLaren']},
+};
+const CIRCUIT_KEYS=Object.keys(CIRCUITS);
+const CIRCUIT_LABELS=['Monaco','Silverstone','Monza','Spa','Suzuka'];
+const ALL_DRIVERS=['Verstappen','Hamilton','Leclerc','Norris','Alonso','Russell','Sainz','Pérez'];
+
+// ============================================================
+// UTILS
+// ============================================================
+function rand(a,b){return Math.random()*(b-a)+a;}
+function lerp(a,b,t){return a+(b-a)*t;}
+function speedColor(t){
+  const s=[[0,.27,1],[0,1,.53],[1,1,0],[1,.39,0]];
+  const i=Math.min(Math.floor(t*3),2),f=t*3-i;
+  const l=(a,b)=>a+(b-a)*f;
+  return`rgb(${Math.round(l(s[i][0],s[i+1][0])*255)},${Math.round(l(s[i][1],s[i+1][1])*255)},${Math.round(l(s[i][2],s[i+1][2])*255)})`;
+}
+function speedColorVec(t){
+  const s=[[0,.27,1],[0,1,.53],[1,1,0],[1,.39,0]];
+  const i=Math.min(Math.floor(t*3),2),f=t*3-i;
+  const l=(a,b)=>a+(b-a)*f;
+  return{r:l(s[i][0],s[i+1][0]),g:l(s[i][1],s[i+1][1]),b:l(s[i][2],s[i+1][2])};
+}
+const chartInst={};
+function chartDefaults(){
+  return{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:'rgba(255,255,255,.45)',font:{family:"'Share Tech Mono',monospace",size:10},boxWidth:10,padding:8}},
+      tooltip:{backgroundColor:'rgba(5,5,18,.95)',borderColor:'rgba(0,245,255,.18)',borderWidth:1,
+        titleColor:'#00f5ff',bodyColor:'rgba(255,255,255,.75)',
+        titleFont:{family:"'Orbitron',sans-serif",size:11},bodyFont:{family:"'Share Tech Mono',monospace",size:10}}},
+    scales:{x:{ticks:{color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}},grid:{color:'rgba(255,255,255,.035)'}},
+      y:{ticks:{color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}},grid:{color:'rgba(255,255,255,.035)'}}}};
+}
+function destroyChart(id){if(chartInst[id]){chartInst[id].destroy();delete chartInst[id];}}
+
+// ============================================================
+// 3D HERO SCENE
+// ============================================================
+let heroScene,heroCamera,heroRenderer,heroAnimId,carGroup,sparkParticles,circuitCurve,heroMX=0,heroMY=0;
+function buildHeroScene(key){
+  const canvas=document.getElementById('hero-canvas');
+  if(!canvas)return;
+  const w=canvas.clientWidth||window.innerWidth,h=canvas.clientHeight||window.innerHeight;
+  const c=CIRCUITS[key];
+  if(heroRenderer){heroRenderer.dispose();if(heroAnimId)cancelAnimationFrame(heroAnimId);}
+  const newCanvas=canvas.cloneNode(true);canvas.parentNode.replaceChild(newCanvas,canvas);
+  const cv=document.getElementById('hero-canvas');
+  heroScene=new THREE.Scene();heroScene.fog=new THREE.FogExp2(0x03030a,.035);
+  heroCamera=new THREE.PerspectiveCamera(60,w/h,.1,250);heroCamera.position.set(0,7,11);heroCamera.lookAt(0,0,0);
+  heroRenderer=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true});
+  heroRenderer.setSize(w,h);heroRenderer.setPixelRatio(Math.min(devicePixelRatio,2));heroRenderer.setClearColor(0x000000,0);
+  heroScene.add(new THREE.AmbientLight(0x112233,2.5));
+  const dl=new THREE.DirectionalLight(0x00f5ff,1.2);dl.position.set(6,10,6);heroScene.add(dl);
+  const pl=new THREE.PointLight(0xe10600,2,18);pl.position.set(0,4,0);heroScene.add(pl);
+  const sPos=new Float32Array(3600);for(let i=0;i<3600;i++)sPos[i]=rand(-100,100);
+  const sGeo=new THREE.BufferGeometry();sGeo.setAttribute('position',new THREE.BufferAttribute(sPos,3));
+  heroScene.add(new THREE.Points(sGeo,new THREE.PointsMaterial({color:0xffffff,size:.07,transparent:true,opacity:.55})));
+  const pts=c.waypoints.map(p=>new THREE.Vector3(p[0]*2.4,p[1]*2.4,p[2]*2.4));
+  circuitCurve=new THREE.CatmullRomCurve3(pts,true);
+  const curvePts=circuitCurve.getPoints(220);
+  const tubeGeo=new THREE.TubeGeometry(circuitCurve,220,.2,8,true);
+  heroScene.add(new THREE.Mesh(tubeGeo,new THREE.MeshPhongMaterial({color:0x181828,shininess:25,transparent:true,opacity:.95})));
+  const lPos=new Float32Array(curvePts.length*3),lCol=new Float32Array(curvePts.length*3);
+  curvePts.forEach((pt,i)=>{
+    lPos[i*3]=pt.x;lPos[i*3+1]=pt.y+.24;lPos[i*3+2]=pt.z;
+    const si=Math.floor(i/curvePts.length*c.speeds.length);
+    const t=(c.speeds[si]-80)/(c.topSpeed-80);
+    const cv2=speedColorVec(Math.max(0,Math.min(1,t)));
+    lCol[i*3]=cv2.r;lCol[i*3+1]=cv2.g;lCol[i*3+2]=cv2.b;
+  });
+  const lGeo=new THREE.BufferGeometry();
+  lGeo.setAttribute('position',new THREE.BufferAttribute(lPos,3));
+  lGeo.setAttribute('color',new THREE.BufferAttribute(lCol,3));
+  heroScene.add(new THREE.Line(lGeo,new THREE.LineBasicMaterial({vertexColors:true,linewidth:2})));
+  for(let d=0;d<c.drs;d++){
+    const pt=circuitCurve.getPoint(.15+d*.4);
+    const bm=new THREE.Mesh(new THREE.BoxGeometry(.35,.05,.9),new THREE.MeshBasicMaterial({color:0x39ff14,transparent:true,opacity:.65}));
+    bm.position.set(pt.x,pt.y+.3,pt.z);heroScene.add(bm);
+  }
+  for(let ki=0;ki<24;ki++){
+    const t=ki/24,pt=circuitCurve.getPoint(t),tang=circuitCurve.getTangent(t);
+    const norm=new THREE.Vector3(-tang.z,0,tang.x).normalize();
+    for(let s=-1;s<=1;s+=2){
+      const km=new THREE.Mesh(new THREE.BoxGeometry(.1,.04,.2),new THREE.MeshBasicMaterial({color:ki%2===0?0xff2222:0xffffff}));
+      km.position.copy(pt).addScaledVector(norm,s*.3).setY(pt.y+.02);heroScene.add(km);
+    }
+  }
+  heroScene.add(new THREE.GridHelper(30,30,0x0d1224,0x0d1224));
+  carGroup=buildCar();heroScene.add(carGroup);
+  const spPos=new Float32Array(150);for(let i=0;i<150;i++)spPos[i]=rand(-.08,.08);
+  const spGeo=new THREE.BufferGeometry();spGeo.setAttribute('position',new THREE.BufferAttribute(spPos,3));
+  sparkParticles=new THREE.Points(spGeo,new THREE.PointsMaterial({color:0xff6b00,size:.045,transparent:true,opacity:.88}));
+  heroScene.add(sparkParticles);
+  let isDrag=false,isRightDrag=false,prevMX=0,prevMY=0,panX=0,panY=0;
+  const DR=9,DT=0.4,DP=1.1;
+  let localTheta=DT,localPhi=DP,localR=DR;
+  cv.addEventListener('mousedown',e=>{e.preventDefault();if(e.button===0)isDrag=true;if(e.button===2)isRightDrag=true;prevMX=e.clientX;prevMY=e.clientY;});
+  window.addEventListener('mouseup',()=>{isDrag=false;isRightDrag=false;});
+  window.addEventListener('mousemove',e=>{
+    if(isDrag){localTheta-=(e.clientX-prevMX)*.007;localPhi=Math.max(.15,Math.min(2.6,localPhi-(e.clientY-prevMY)*.007));prevMX=e.clientX;prevMY=e.clientY;}
+    else if(isRightDrag){panX-=(e.clientX-prevMX)*.018;panY+=(e.clientY-prevMY)*.012;prevMX=e.clientX;prevMY=e.clientY;}
+  });
+  cv.addEventListener('wheel',e=>{e.preventDefault();localR=Math.max(2.5,Math.min(28,localR+e.deltaY*.018));},{passive:false});
+  cv.addEventListener('dblclick',()=>{localTheta=DT;localPhi=DP;localR=DR;panX=0;panY=0;});
+  cv.addEventListener('contextmenu',e=>e.preventDefault());
+  cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();heroMX=(e.clientX-r.width/2)/r.width*3;heroMY=(e.clientY-r.height/2)/r.height*2;});
+  let carT=0,t0=performance.now();
+  (function loop(){
+    heroAnimId=requestAnimationFrame(loop);
+    const now=performance.now(),dt=(now-t0)/1000;t0=now;carT=(carT+dt*.028)%1;
+    if(circuitCurve){const pos=circuitCurve.getPoint(carT),tang=circuitCurve.getTangent(carT);carGroup.position.copy(pos).add(new THREE.Vector3(0,.3,0));carGroup.lookAt(pos.clone().add(tang));}
+    if(sparkParticles){
+      sparkParticles.position.copy(carGroup.position).sub(new THREE.Vector3(0,.1,0));
+      const sp=sparkParticles.geometry.attributes.position.array;
+      for(let i=0;i<150;i+=3){sp[i]+=rand(-.035,.035);sp[i+1]+=rand(-.018,.008);sp[i+2]+=rand(-.035,.035);if(Math.abs(sp[i])>.28||Math.abs(sp[i+2])>.28){sp[i]=rand(-.04,.04);sp[i+1]=rand(0,.015);sp[i+2]=rand(-.04,.04);}}
+      sparkParticles.geometry.attributes.position.needsUpdate=true;
+    }
+    if(!isDrag&&!isRightDrag)localTheta+=.0025;
+    heroCamera.position.x=Math.sin(localTheta)*localR*Math.sin(localPhi)+panX+heroMX*.4;
+    heroCamera.position.y=Math.cos(localPhi)*localR*.55+2.5+panY;
+    heroCamera.position.z=Math.cos(localTheta)*localR*Math.sin(localPhi)+heroMY*.2;
+    heroCamera.lookAt(panX,panY*.2,0);heroRenderer.render(heroScene,heroCamera);
+  })();
+}
+function buildCar(){
+  const g=new THREE.Group();
+  const body=new THREE.MeshPhongMaterial({color:0x0033cc,shininess:90});
+  const acc=new THREE.MeshBasicMaterial({color:0xe10600});
+  const dark=new THREE.MeshPhongMaterial({color:0x111111,shininess:20});
+  function obj(geo,mat,x=0,y=0,z=0,rx=0,ry=0,rz=0){const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.rotation.set(rx,ry,rz);return m;}
+  g.add(obj(new THREE.BoxGeometry(.3,.065,.85),body,0,.045,0));
+  g.add(obj(new THREE.CylinderGeometry(.022,.075,.38,6),body,0,.045,.59,0,0,Math.PI/2));
+  g.add(obj(new THREE.TorusGeometry(.1,.01,4,16,Math.PI),new THREE.MeshBasicMaterial({color:0xcccc00}),0,.125,-.04,Math.PI/2,0,0));
+  g.add(obj(new THREE.BoxGeometry(.55,.022,.15),acc,0,.015,.68));
+  g.add(obj(new THREE.BoxGeometry(.46,.2,.04),acc,0,.12,-.58));
+  [-1,1].forEach(s=>g.add(obj(new THREE.BoxGeometry(.09,.065,.42),body,s*.2,.045,0)));
+  [[.2,.075,.34],[-.2,.075,.34],[.2,.075,-.3],[-.2,.075,-.3]].forEach(p=>{
+    const w=new THREE.Mesh(new THREE.CylinderGeometry(.075,.075,.065,12),dark);
+    w.rotation.z=Math.PI/2;w.position.set(...p);g.add(w);
+  });
+  g.scale.setScalar(1.35);return g;
+}
+
+// ============================================================
+// 3D TYRE SCENE
+// ============================================================
+// ORIENTATION FIXES:
+//   Camera is at (0,0,4.2) looking along -Z.
+//   The main tyre torus lies in the XY plane by default — correct, appears as a
+//   face-on wheel ring from the camera.
+//   BUG: groove/stripe rings previously used position.set(OFF,0,0) + rotation.y=PI/2,
+//   which put them in the XZ plane — they appeared as squashed horizontal ovals.
+//   FIX: all rings stay in the XY plane (no rotation.y). Lateral offsets are
+//   placed along Z (depth) so they sit inside the tyre tube at different depths,
+//   creating a visible concentric band effect on the tyre face.
+//   SPIN FIX: rotation was previously x+=.014, y+=.005 which tumbled the tyre
+//   like a ball. Now only z rotates, spinning the tyre naturally on its axle.
+// ============================================================
+let tyreScene,tyreCamera,tyreRenderer,tyreAnimId,tyreMesh;
+function buildTyreScene(compound){
+  const canvas=document.getElementById('tyre-canvas');if(!canvas)return;
+  if(tyreRenderer){tyreRenderer.dispose();if(tyreAnimId)cancelAnimationFrame(tyreAnimId);}
+  tyreScene=new THREE.Scene();
+  // Camera looks straight along -Z — tyre face fills the view
+  tyreCamera=new THREE.PerspectiveCamera(50,1,.1,100);tyreCamera.position.set(0,0,4.2);
+  tyreRenderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+  tyreRenderer.setSize(170,170);tyreRenderer.setPixelRatio(Math.min(devicePixelRatio,2));tyreRenderer.setClearColor(0x000000,0);
+  // Lighting: main front, subtle rim-light from behind-left
+  tyreScene.add(new THREE.AmbientLight(0x888899,2.0));
+  const dl=new THREE.DirectionalLight(0xffffff,2.4);dl.position.set(2,3,5);tyreScene.add(dl);
+  const dl2=new THREE.DirectionalLight(0x2244aa,1.0);dl2.position.set(-4,-2,-3);tyreScene.add(dl2);
+  const COLS={soft:new THREE.Color('#ff2222'),medium:new THREE.Color('#f5e642'),hard:new THREE.Color('#f0f0f0'),inter:new THREE.Color('#39ff14'),wet:new THREE.Color('#00f5ff')};
+  const col=COLS[compound]||COLS.soft;
+  tyreMesh=new THREE.Group();tyreScene.add(tyreMesh);
+
+  // Helper: torus ring in XY plane (face-on), offset along Z for depth banding
+  function ring(r,tube,segs,col,zOff=0){
+    const m=new THREE.Mesh(new THREE.TorusGeometry(r,tube,segs,72),new THREE.MeshBasicMaterial({color:col}));
+    if(zOff)m.position.z=zOff;
+    return m;
+  }
+  // Helper: rim cylinder — rotation.x=PI/2 aligns axis with Z, circular face toward camera
+  function addRim(r,d,col,shininess){
+    const rim=new THREE.Mesh(new THREE.CylinderGeometry(r,r,d,24),new THREE.MeshPhongMaterial({color:col,shininess}));
+    rim.rotation.x=Math.PI/2;tyreMesh.add(rim);
+  }
+  // Helper: spokes in XY plane, rotated around Z axis
+  function addSpokes(n,r,w,h,col,shininess){
+    for(let i=0;i<n;i++){
+      const ang=i/n*Math.PI*2;
+      const sp=new THREE.Mesh(new THREE.BoxGeometry(w,h,.045),new THREE.MeshPhongMaterial({color,shininess}));
+      sp.position.set(Math.cos(ang)*r,Math.sin(ang)*r,0);sp.rotation.z=ang;tyreMesh.add(sp);
+    }
+  }
+
+  if(compound==='soft'){
+    // Slick profile — aggressive, low-profile
+    tyreMesh.add(new THREE.Mesh(new THREE.TorusGeometry(1,.38,32,72),new THREE.MeshPhongMaterial({color:0x151515,shininess:80,specular:0x223344})));
+    // Shoulder edge rings — sit at the outer edges of the tyre tube along Z
+    [-1,1].forEach(s=>tyreMesh.add(ring(1,.04,8,0x2a2a2a,s*.28)));
+    // Bold compound stripe — centred on face
+    tyreMesh.add(ring(1,.10,8,col,0));
+    // Inner shoulder highlight ring
+    tyreMesh.add(ring(1,.022,6,0x3a3a3a,0));
+    addRim(.57,.48,0x1e1e1e,130);
+    addSpokes(5,.28,.058,.42,0x404040,85);
+
+  }else if(compound==='medium'){
+    // Standard profile — 3 circumferential grooves as concentric depth bands
+    tyreMesh.add(new THREE.Mesh(new THREE.TorusGeometry(1,.42,32,72),new THREE.MeshPhongMaterial({color:0x161616,shininess:55,specular:0x112233})));
+    // Three groove bands at different Z depths — appear as concentric dark rings
+    [-0.22,0,0.22].forEach(z=>tyreMesh.add(ring(1.01,.022,6,0x040404,z)));
+    // Compound stripe centred
+    tyreMesh.add(ring(1,.075,8,col,0));
+    addRim(.55,.52,0x181818,95);
+    addSpokes(10,.27,.038,.38,0x303030,60);
+
+  }else if(compound==='hard'){
+    // Wider, stiffer profile — 5 grooves, prominent shoulder blocks
+    tyreMesh.add(new THREE.Mesh(new THREE.TorusGeometry(1,.46,32,72),new THREE.MeshPhongMaterial({color:0x222222,shininess:35,specular:0x111111})));
+    // 5 circumferential grooves spread across face depth
+    [-0.30,-0.15,0,0.15,0.30].forEach(z=>tyreMesh.add(ring(1.01,.022,6,0x080808,z)));
+    // Shoulder tread blocks — positioned around the tyre at outer radius, visible on face
+    for(let i=0;i<16;i++){
+      const ang=i/16*Math.PI*2;
+      [-1,1].forEach(s=>{
+        const blk=new THREE.Mesh(new THREE.BoxGeometry(.10,.10,.08),new THREE.MeshBasicMaterial({color:0x3a3a3a}));
+        blk.position.set(Math.cos(ang)*.92,Math.sin(ang)*.92,s*.25);blk.rotation.z=ang;tyreMesh.add(blk);
+      });
+    }
+    // Light compound stripe (white/light grey)
+    tyreMesh.add(ring(1,.065,8,col,0));
+    addRim(.53,.56,0x3a3a3a,110);
+    addSpokes(8,.27,.05,.40,0x555555,85);
+
+  }else if(compound==='inter'){
+    // Intermediate — angled V-tread, double green stripe
+    tyreMesh.add(new THREE.Mesh(new THREE.TorusGeometry(1,.43,32,72),new THREE.MeshPhongMaterial({color:0x0e160e,shininess:45,specular:0x112211})));
+    // V-groove tread: angled slots around the circumference
+    for(let i=0;i<14;i++){
+      const ang=i/14*Math.PI*2;
+      [-0.18,0.18].forEach(zOff=>{
+        const gr=new THREE.Mesh(new THREE.BoxGeometry(.04,.05,.35),new THREE.MeshBasicMaterial({color:0x060c06}));
+        gr.position.set(Math.cos(ang)*.96,Math.sin(ang)*.96,zOff);
+        gr.rotation.z=ang+(zOff<0?.18:-.18);tyreMesh.add(gr);
+      });
+    }
+    // Double compound stripe — two concentric rings at ±Z depth
+    [-0.14,0.14].forEach(z=>tyreMesh.add(ring(1,.038,8,col,z)));
+    addRim(.54,.50,0x0c180c,75);
+    addSpokes(6,.27,.042,.38,0x1a301a,65);
+
+  }else{
+    // Full wet — 4 circumferential drainage channels + radial slots
+    tyreMesh.add(new THREE.Mesh(new THREE.TorusGeometry(1,.45,32,72),new THREE.MeshPhongMaterial({color:0x08121e,shininess:65,specular:0x002244})));
+    // 4 main drainage channels as deep dark rings at different Z depths
+    [-0.30,-0.10,0.10,0.30].forEach(z=>tyreMesh.add(ring(1.005,.038,6,0x020408,z)));
+    // Radial drainage slots — around the circumference, in XY plane
+    for(let i=0;i<20;i++){
+      const ang=i/20*Math.PI*2;
+      const slot=new THREE.Mesh(new THREE.BoxGeometry(.03,.04,.40),new THREE.MeshBasicMaterial({color:0x020408}));
+      slot.position.set(Math.cos(ang)*.96,Math.sin(ang)*.96,0);slot.rotation.z=ang;tyreMesh.add(slot);
+    }
+    // Double cyan stripe — rings at ±Z offset
+    [-0.08,0.08].forEach(z=>tyreMesh.add(ring(1,.042,8,col,z)));
+    addRim(.55,.54,0x081422,115);
+    addSpokes(7,.27,.044,.40,0x143060,80);
+  }
+
+  // FIX: spin only around Z axis — tyre rotates on its axle like a real wheel
+  (function loop(){
+    tyreAnimId=requestAnimationFrame(loop);
+    tyreMesh.rotation.z+=.016;
+    tyreRenderer.render(tyreScene,tyreCamera);
+  })();
+}
+
+// ============================================================
+// 3D SCATTER SCENE
+// ============================================================
+let scatterScene,scatterCamera,scatterRenderer,scatterAnimId,scatterTheta=.5,scatterPhi=1.0,scatterDrag=false,prevSX=0,prevSY=0;
+function buildScatterScene(){
+  const canvas=document.getElementById('scatter3d-canvas');if(!canvas)return;
+  const container=document.getElementById('card-scatter3d');
+  const w=Math.max((canvas.parentElement||container).clientWidth-44||400,300),h=250;
+  canvas.width=w;canvas.height=h;
+  let labelCanvas=document.getElementById('scatter3d-labels');
+  if(!labelCanvas){labelCanvas=document.createElement('canvas');labelCanvas.id='scatter3d-labels';labelCanvas.style.cssText='position:absolute;top:0;left:0;pointer-events:none;';canvas.parentNode.style.position='relative';canvas.parentNode.appendChild(labelCanvas);}
+  labelCanvas.width=w;labelCanvas.height=h;labelCanvas.style.width=w+'px';labelCanvas.style.height=h+'px';
+  if(scatterRenderer){scatterRenderer.dispose();if(scatterAnimId)cancelAnimationFrame(scatterAnimId);}
+  scatterScene=new THREE.Scene();
+  scatterCamera=new THREE.PerspectiveCamera(55,w/h,.1,200);scatterCamera.position.set(8,5,8);scatterCamera.lookAt(0,0,0);
+  scatterRenderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+  scatterRenderer.setSize(w,h);scatterRenderer.setPixelRatio(Math.min(devicePixelRatio,2));scatterRenderer.setClearColor(0x000000,0);
+  scatterScene.add(new THREE.AmbientLight(0x223344,3));
+  const sdl=new THREE.DirectionalLight(0x00f5ff,1.2);sdl.position.set(5,8,5);scatterScene.add(sdl);
+  const axMat=new THREE.LineBasicMaterial({color:0x223355});
+  [[new THREE.Vector3(-5,0,0),new THREE.Vector3(5,0,0)],[new THREE.Vector3(0,-5,0),new THREE.Vector3(0,5,0)],[new THREE.Vector3(0,0,-5),new THREE.Vector3(0,0,5)]].forEach(([a,b])=>{scatterScene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a,b]),axMat));});
+  [[0xe10600,new THREE.Vector3(5,0,0)],[0x39ff14,new THREE.Vector3(0,5,0)],[0x00f5ff,new THREE.Vector3(0,0,5)]].forEach(([c,pt])=>{const s=new THREE.Mesh(new THREE.SphereGeometry(.1,8,8),new THREE.MeshBasicMaterial({color:c}));s.position.copy(pt);scatterScene.add(s);});
+  const circuitDefs={
+    monaco:{x:-3.5,y:0.0,z:3.5,col:0xff0090,hexStr:'#ff0090',label:'Monaco',sub:'Street · Low Speed'},
+    silverstone:{x:1.5,y:-1.5,z:0.5,col:0x00f5ff,hexStr:'#00f5ff',label:'Silverstone',sub:'High Speed · Tech'},
+    monza:{x:3.8,y:-2.0,z:-3.0,col:0xff2222,hexStr:'#ff2222',label:'Monza',sub:'Power · Low Downforce'},
+    spa:{x:2.5,y:4.0,z:0.8,col:0x39ff14,hexStr:'#39ff14',label:'Spa',sub:'Full Mix · Elevation'},
+    suzuka:{x:0.8,y:-0.8,z:2.8,col:0xf5e642,hexStr:'#f5e642',label:'Suzuka',sub:'Technical · Figure-8'},
+  };
+  const spheres=[],labelAnchors=[];
+  Object.values(circuitDefs).forEach(d=>{
+    for(let s=0;s<5;s++){
+      const sm=new THREE.Mesh(new THREE.SphereGeometry(s===4?.22:.13,10,10),new THREE.MeshPhongMaterial({color:d.col,shininess:90,emissive:d.col,emissiveIntensity:.28}));
+      sm.position.set(d.x+rand(-.42,.42),d.y+rand(-.32,.32),d.z+rand(-.38,.38));scatterScene.add(sm);spheres.push(sm);
+    }
+    const hull=new THREE.Mesh(new THREE.SphereGeometry(.88,10,10),new THREE.MeshBasicMaterial({color:d.col,wireframe:true,transparent:true,opacity:.1}));
+    hull.position.set(d.x,d.y,d.z);scatterScene.add(hull);
+    labelAnchors.push({pos3d:new THREE.Vector3(d.x,d.y+1.2,d.z),label:d.label,sub:d.sub,hexStr:d.hexStr});
+  });
+  scatterScene.add(new THREE.GridHelper(14,14,0x0d1224,0x0d1224));
+  function project(v){const vC=v.clone();vC.project(scatterCamera);return{x:(vC.x*.5+.5)*w,y:(-.5*vC.y+.5)*h,visible:vC.z>-1&&vC.z<1};}
+  const lctx=labelCanvas.getContext('2d');
+  function drawLabels(){
+    lctx.clearRect(0,0,w,h);
+    labelAnchors.forEach(({pos3d,label,sub,hexStr})=>{
+      const{x,y,visible}=project(pos3d);if(!visible||x<0||x>w||y<0||y>h)return;
+      lctx.save();lctx.shadowColor=hexStr;lctx.shadowBlur=10;lctx.beginPath();lctx.arc(x,y,4,0,Math.PI*2);lctx.fillStyle=hexStr;lctx.fill();lctx.restore();
+      const bw=108,bh=34,bx=x+10,by=y-17;
+      lctx.save();lctx.globalAlpha=.82;lctx.fillStyle='rgba(3,3,14,.88)';lctx.beginPath();if(lctx.roundRect)lctx.roundRect(bx,by,bw,bh,4);else lctx.rect(bx,by,bw,bh);lctx.fill();lctx.strokeStyle=hexStr;lctx.lineWidth=1;lctx.globalAlpha=.5;lctx.stroke();lctx.restore();
+      lctx.save();lctx.font="bold 11px 'Orbitron',monospace";lctx.fillStyle=hexStr;lctx.shadowColor=hexStr;lctx.shadowBlur=6;lctx.fillText(label,bx+7,by+14);lctx.restore();
+      lctx.save();lctx.font="9px 'Share Tech Mono',monospace";lctx.fillStyle='rgba(255,255,255,.5)';lctx.fillText(sub,bx+7,by+27);lctx.restore();
+      lctx.save();lctx.strokeStyle=hexStr;lctx.lineWidth=.5;lctx.globalAlpha=.35;lctx.beginPath();lctx.moveTo(x+4,y);lctx.lineTo(bx,by+bh/2);lctx.stroke();lctx.restore();
+    });
+    [{pos:new THREE.Vector3(5.5,0,0),text:'→ SPEED',col:'#e10600'},{pos:new THREE.Vector3(0,5.5,0),text:'↑ ELEVATION',col:'#39ff14'},{pos:new THREE.Vector3(0,0,5.5),text:'● TECHNICALITY',col:'#00f5ff'}].forEach(({pos,text,col})=>{
+      const{x:ax,y:ay,visible}=project(pos);if(!visible)return;
+      lctx.save();lctx.font="bold 9px 'Share Tech Mono',monospace";lctx.fillStyle=col;lctx.shadowColor=col;lctx.shadowBlur=4;lctx.fillText(text,ax-20,ay+4);lctx.restore();
+    });
+  }
+  (function loop(){scatterAnimId=requestAnimationFrame(loop);if(!scatterDrag)scatterTheta+=.004;const r=13;scatterCamera.position.x=Math.sin(scatterTheta)*r*Math.sin(scatterPhi);scatterCamera.position.y=Math.cos(scatterPhi)*r*.45+2;scatterCamera.position.z=Math.cos(scatterTheta)*r*Math.sin(scatterPhi);scatterCamera.lookAt(0,0,0);const t=performance.now()*.0018;spheres.forEach((s,i)=>s.scale.setScalar(1+.06*Math.sin(t+i*.5)));scatterRenderer.render(scatterScene,scatterCamera);drawLabels();})();
+  canvas.addEventListener('mousedown',e=>{scatterDrag=true;prevSX=e.clientX;prevSY=e.clientY;});
+  window.addEventListener('mouseup',()=>scatterDrag=false);
+  canvas.addEventListener('mousemove',e=>{if(!scatterDrag)return;scatterTheta-=(e.clientX-prevSX)*.009;scatterPhi=Math.max(.2,Math.min(2.8,scatterPhi-(e.clientY-prevSY)*.009));prevSX=e.clientX;prevSY=e.clientY;});
+}
+
+// ============================================================
+// CHARTS
+// ============================================================
+function buildAllCharts(key){
+  const c=CIRCUITS[key];
+  buildSpeedChart(c);buildThrottleChart(c);buildBrakeChart(c);buildBrakeScatterChart(c);
+  buildGforceChart(c);buildTyreStratChart(c);buildRadarChart(c,key);buildWinProbChart(c);
+  buildFeaturesChart(c);buildHeatmap();buildPredList(c);buildPointsChart();
+}
+function buildSpeedChart(c){destroyChart('speed');const n=c.waypoints.length;const dist=Array.from({length:n},(_,i)=>Math.round(i*c.length*1000/n));const base=Array.from({length:n},(_,i)=>c.speeds[Math.floor(i/n*c.speeds.length)]);const colors=['#00f5ff','#ff2222','#39ff14'];const labels2=['VER','LEC','HAM'];const datasets=labels2.map((l,li)=>({label:l,data:base.map(s=>+(s*rand(.94,1.06)+rand(-6,6)).toFixed(1)),borderColor:colors[li],backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:.45}));const opts=chartDefaults();opts.scales.x.title={display:true,text:'Distance (m)',color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}};opts.scales.y.title={display:true,text:'Speed (km/h)',color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}};const el=document.getElementById('chartSpeed');if(el)chartInst['speed']=new Chart(el.getContext('2d'),{type:'line',data:{labels:dist,datasets},options:opts});}
+function buildThrottleChart(c){destroyChart('throttle');const n=36,labels=Array.from({length:n},(_,i)=>(i*c.length*1000/n|0)+'');const d=Array.from({length:n},()=>Math.max(0,Math.min(100,rand(45,100))));const el=document.getElementById('chartThrottle');if(el)chartInst['throttle']=new Chart(el.getContext('2d'),{type:'bar',data:{labels,datasets:[{label:'Throttle %',data:d,backgroundColor:d.map(v=>`rgba(57,255,20,${v/100})`),borderColor:'rgba(57,255,20,.25)',borderWidth:1,borderRadius:2}]},options:chartDefaults()});}
+function buildBrakeChart(c){destroyChart('brake');const n=60;const labels=Array.from({length:n},(_,i)=>(i*c.length*1000/n|0));const cornerPoints=Array.from({length:c.corners},(_,ci)=>Math.round(ci/c.corners*n));const d=Array.from({length:n},(_,i)=>{let v=4+rand(0,8);for(let ci=0;ci<c.corners;ci++){if(Math.abs(i/n-ci/c.corners)<.045)v=Math.max(v,rand(55,100));}return +v.toFixed(1);});const pointBg=d.map((_,i)=>cornerPoints.some(cp=>Math.abs(i-cp)<2)?'rgba(255,0,144,.9)':'transparent');const pointR=d.map((_,i)=>cornerPoints.some(cp=>Math.abs(i-cp)<2)?4:0);const el=document.getElementById('chartBrake');if(el)chartInst['brake']=new Chart(el.getContext('2d'),{type:'line',data:{labels,datasets:[{label:'Brake %',data:d,borderColor:'#ff0090',backgroundColor:'rgba(255,0,144,.07)',fill:true,borderWidth:1.8,pointRadius:pointR,pointBackgroundColor:pointBg,pointBorderColor:'rgba(255,0,144,.6)',pointBorderWidth:1,tension:.12}]},options:chartDefaults()});}
+function buildBrakeScatterChart(c){destroyChart('bscatter');const d=Array.from({length:40},()=>({x:+(rand(0,c.length*1000).toFixed(0)),y:+(rand(15,100).toFixed(1)),r:+(rand(3,11)).toFixed(1)}));const el=document.getElementById('chartBrakeScatter');if(el)chartInst['bscatter']=new Chart(el.getContext('2d'),{type:'bubble',data:{datasets:[{label:'Brake Events',data:d,backgroundColor:'rgba(255,0,144,.28)',borderColor:'rgba(255,0,144,.55)',borderWidth:1}]},options:chartDefaults()});}
+function buildGforceChart(c){destroyChart('gforce');const n=55;const d=Array.from({length:n},()=>{const lat=rand(-4.2,4.2),lon=rand(-5.2,5.2),spd=rand(80,c.topSpeed);return{x:+lat.toFixed(2),y:+lon.toFixed(2),r:Math.max(3,(spd-80)/38)};});const opts=chartDefaults();opts.scales.x.title={display:true,text:'Lateral G',color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}};opts.scales.y.title={display:true,text:'Longitudinal G',color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}};const el=document.getElementById('chartGforce');if(el)chartInst['gforce']=new Chart(el.getContext('2d'),{type:'bubble',data:{datasets:[{label:'G-Force',data:d,backgroundColor:d.map(p=>{const t=Math.hypot(p.x,p.y)/7;return speedColor(Math.min(t,1)).replace('rgb','rgba').replace(')',`,.35)`);}),borderColor:d.map(p=>speedColor(Math.min(Math.hypot(p.x,p.y)/7,1))),borderWidth:1}]},options:opts});}
+function buildTyreStratChart(c){destroyChart('tyre');const drvs=['VER','LEC','HAM','NOR','ALO'];const strats=[[['soft',15],['medium',25],['hard',c.laps-40]],[['medium',20],['hard',28],['soft',c.laps-48]],[['soft',12],['hard',30],['medium',c.laps-42]],[['soft',18],['medium',c.laps-18]],[['medium',25],['hard',c.laps-25]]];const cmpCol={soft:'rgba(255,34,34,.8)',medium:'rgba(245,230,66,.8)',hard:'rgba(240,240,240,.8)',inter:'rgba(57,255,20,.8)',wet:'rgba(0,245,255,.8)'};const datasets=[];drvs.forEach((d,di)=>{let st=0;strats[di].forEach(([cp,lp])=>{datasets.push({label:`${d} ${cp.toUpperCase()}`,data:[{x:st,y:di},{x:st+lp,y:di}],borderColor:cmpCol[cp],borderWidth:9,pointRadius:0,showLine:true});st+=lp;});});const opts=chartDefaults();opts.plugins.legend={display:false};opts.scales.x.title={display:true,text:'Lap',color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}};opts.scales.x.min=0;opts.scales.x.max=c.laps;opts.scales.y.ticks={...opts.scales.y.ticks,callback:v=>drvs[v]||'',stepSize:1};opts.scales.y.min=-.5;opts.scales.y.max=4.5;const el=document.getElementById('chartTyreStrat');if(el)chartInst['tyre']=new Chart(el.getContext('2d'),{type:'scatter',data:{datasets},options:opts});}
+function buildRadarChart(c,activeKey){destroyChart('radar');const labels=Object.keys(c.radar);const otherKey=CIRCUIT_KEYS.find(k=>k!==activeKey)||'monza';const other=CIRCUITS[otherKey];const el=document.getElementById('chartRadar');if(!el)return;chartInst['radar']=new Chart(el.getContext('2d'),{type:'radar',data:{labels,datasets:[{label:c.name.split(' ').pop(),data:Object.values(c.radar),borderColor:'#00f5ff',backgroundColor:'rgba(0,245,255,.07)',pointBackgroundColor:'#00f5ff',borderWidth:1.5,pointRadius:3},{label:other.name.split(' ').pop(),data:Object.values(other.radar),borderColor:'#ff0090',backgroundColor:'rgba(255,0,144,.05)',pointBackgroundColor:'#ff0090',borderWidth:1.5,pointRadius:3}]},options:{...chartDefaults(),scales:{r:{ticks:{color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9},backdropColor:'transparent'},grid:{color:'rgba(255,255,255,.07)'},angleLines:{color:'rgba(255,255,255,.07)'},pointLabels:{color:'rgba(255,255,255,.45)',font:{family:"'Share Tech Mono',monospace",size:9}}}}}});}
+function buildWinProbChart(c){destroyChart('winprob');const colors=['rgba(0,245,255,.7)','rgba(255,34,34,.7)','rgba(57,255,20,.7)','rgba(245,230,66,.7)','rgba(191,95,255,.7)'];const borders=['#00f5ff','#ff2222','#39ff14','#f5e642','#bf5fff'];const opts=chartDefaults();opts.indexAxis='y';opts.plugins.legend={display:false};opts.plugins.tooltip.callbacks={label:ctx=>`${ctx.parsed.x.toFixed(1)}%`};const el=document.getElementById('chartWinProb');if(el)chartInst['winprob']=new Chart(el.getContext('2d'),{type:'bar',data:{labels:c.constructors,datasets:[{label:'Win %',data:c.winProbs,backgroundColor:colors,borderColor:borders,borderWidth:1,borderRadius:4}]},options:opts});}
+function buildFeaturesChart(c){destroyChart('features');const drvs=c.drivers.slice(0,4);const feats=['Quali Pace','Race Pace','Tyre Mgmt','Wet Weather','Starts'];const cols=['#00f5ff','#ff2222','#39ff14','#f5e642'];const el=document.getElementById('chartFeatures');if(el)chartInst['features']=new Chart(el.getContext('2d'),{type:'bar',data:{labels:feats,datasets:drvs.map((d,i)=>({label:d,data:Array.from({length:5},()=>+(rand(62,98)).toFixed(1)),backgroundColor:`${cols[i]}28`,borderColor:cols[i],borderWidth:1.5,borderRadius:3}))},options:{...chartDefaults(),scales:{...chartDefaults().scales,y:{...chartDefaults().scales.y,min:50,max:100}}}});}
+
+// ── FIX 2: Heatmap — vibrant HSL gradient (blue→green→yellow→red) ──────────
+function buildHeatmap(){
+  const grid=document.getElementById('heatmap-grid');if(!grid)return;
+  grid.innerHTML='';
+  const blank=document.createElement('div');blank.className='hm-cell hm-header hm-label';blank.textContent='DRIVER';grid.appendChild(blank);
+  CIRCUIT_LABELS.forEach(l=>{const h=document.createElement('div');h.className='hm-cell hm-header';h.textContent=l.toUpperCase();grid.appendChild(h);});
+  ALL_DRIVERS.forEach(drv=>{
+    const lbl=document.createElement('div');lbl.className='hm-cell hm-label';lbl.textContent=drv.slice(0,3).toUpperCase();grid.appendChild(lbl);
+    CIRCUIT_LABELS.forEach(()=>{
+      const sc=rand(52,99),t=(sc-52)/47;
+      // Vibrant HSL: blue(240°) → green(120°) → yellow(60°) → red(0°)
+      const hue=Math.round(240-t*240);
+      const sat=96, light=50;
+      const textCol=t>0.45?'rgba(0,0,0,.88)':'rgba(255,255,255,.95)';
+      const cell=document.createElement('div');cell.className='hm-cell';
+      cell.style.cssText=`background:hsl(${hue},${sat}%,${light}%);color:${textCol};`;
+      cell.innerHTML=`<span style="font-size:20px;font-weight:800;line-height:1">${Math.round(sc)}</span>`;
+      if(sc>90)cell.innerHTML+=`<span style="position:absolute;top:4px;right:5px;font-size:10px;opacity:.9">★</span>`;
+      grid.appendChild(cell);
+    });
+  });
+}
+
+function buildPredList(c){
+  const list=document.getElementById('pred-list');if(!list)return;list.innerHTML='';
+  const preds=c.drivers.map((d,i)=>({name:d,team:c.teams[i],prob:Math.max(3,c.winProbs[i]+rand(-2,2))})).sort((a,b)=>b.prob-a.prob);
+  const total=preds.reduce((s,p)=>s+p.prob,0);
+  const bcols=['#f5e642','rgba(255,255,255,.65)','#ff6b00','#00f5ff','#39ff14'];
+  preds.forEach((p,i)=>{const pct=(p.prob/total*100).toFixed(1);const item=document.createElement('div');item.className='pred-item';item.innerHTML=`<div class="pred-pos ${i<3?'p'+(i+1):''}">${i+1}</div><div class="pred-driver"><div class="pred-name">${p.name}</div><div class="pred-team">${p.team}</div></div><div class="pred-bar-wrap"><div class="pred-bar" style="width:0%;background:${bcols[i]||'#666'}" data-pct="${pct}"></div></div><div class="pred-pct" style="color:${bcols[i]||'#666'}">${pct}%</div>`;list.appendChild(item);});
+  setTimeout(()=>list.querySelectorAll('.pred-bar').forEach(b=>b.style.width=b.dataset.pct+'%'),300);
+}
+function buildPointsChart(){destroyChart('points');const races=Array.from({length:22},(_,i)=>`R${i+1}`);const drivers2=['Verstappen','Hamilton','Leclerc','Norris'];const cols2=['#00f5ff','#39ff14','#ff2222','#f5e642'];const datasets=drivers2.map((d,di)=>{let cum=0;const data=races.map(()=>{cum+=(di===0?rand(15,25):di===1?rand(8,20):di===2?rand(6,18):rand(5,15));return Math.round(cum);});return{label:d,data,borderColor:cols2[di],backgroundColor:'transparent',borderWidth:di===0?2:1.5,pointRadius:0,tension:.4};});const el=document.getElementById('chartPoints');if(el)chartInst['points']=new Chart(el.getContext('2d'),{type:'line',data:{labels:races,datasets},options:chartDefaults()});}
+
+// ML chart
+let mlChart=null;
+function buildMLChart(laps,top3,lapData){
+  if(mlChart){mlChart.destroy();mlChart=null;}
+  const lcols=['#f5e642','rgba(255,255,255,.65)','#ff6b00'];
+  const opts=chartDefaults();opts.scales.x.title={display:true,text:'Lap',color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}};opts.scales.y.title={display:true,text:'Win Probability %',color:'rgba(255,255,255,.28)',font:{family:"'Share Tech Mono',monospace",size:9}};opts.scales.y.min=0;opts.scales.y.max=62;
+  const el=document.getElementById('chartMLLap');if(el)mlChart=new Chart(el.getContext('2d'),{type:'line',data:{labels:laps,datasets:top3.map((p,i)=>({label:p.driver,data:lapData[i],borderColor:lcols[i],backgroundColor:'transparent',borderWidth:i===0?2:1.5,pointRadius:0,tension:.4,borderDash:i===2?[4,2]:[]}))}  ,options:opts});
+}
+</script>
+
+<!-- ── React Components ───────────────────────────────────────────────────── -->
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+
+/* ── Loader ─────────────────────────────────────────────────────────────── */
+function Loader(){
+  const fillRef=useRef(null),statusRef=useRef(null);
+  useEffect(()=>{
+    const fill=fillRef.current,status=statusRef.current;if(!fill||!status)return;
+    const msgs=['INITIALIZING TELEMETRY SYSTEMS...','LOADING CIRCUIT DATA...','PARSING FASTF1 SESSION...','BUILDING ML FEATURE MATRIX...','CALIBRATING TYRE MODELS...','RENDERING 3D CIRCUIT...','READY'];
+    let pct=0;
+    (function step(){pct=Math.min(pct+rand(8,18),100);fill.style.width=pct+'%';status.textContent=msgs[Math.min(Math.floor(pct/100*msgs.length),msgs.length-1)];if(pct<100)setTimeout(step,rand(75,190));else setTimeout(()=>{const l=document.getElementById('loader');if(l)l.classList.add('hide');},350);})();
+  },[]);
+  return(<div id="loader"><div className="loader-logo">F1<span>APEX</span></div><div className="loader-bar"><div className="loader-fill" ref={fillRef} id="loader-fill"/></div><div className="loader-status" ref={statusRef} id="loader-status">INITIALIZING...</div></div>);
+}
+
+/* ── Navbar — FIX 1: clock is a flex sibling inside nav ─────────────────── */
+function Navbar({activeCircuit,onCircuitChange}){
+  const clockRef=useRef(null);
+  useEffect(()=>{
+    function tick(){if(!clockRef.current)return;const d=new Date();clockRef.current.textContent=[d.getUTCHours(),d.getUTCMinutes(),d.getUTCSeconds()].map(v=>String(v).padStart(2,'0')).join(':')+' UTC';}
+    tick();const id=setInterval(tick,1000);return()=>clearInterval(id);
+  },[]);
+  const circuits=[{key:'monaco',label:'Monaco'},{key:'silverstone',label:'Silverstone'},{key:'monza',label:'Monza'},{key:'spa',label:'Spa'},{key:'suzuka',label:'Suzuka'}];
+  return(
+    <nav>
+      <div className="nav-logo">F1<span>APEX</span></div>
+      <ul className="nav-links">
+        <li><a href="#hero">Circuit</a></li>
+        <li><a href="#charts-section">Analytics</a></li>
+        <li><a href="#ml-section">ML Engine</a></li>
+      </ul>
+      <div className="circuit-selector" id="circuit-selector">
+        {circuits.map(({key,label})=>(
+          <button key={key} className={`circuit-btn${activeCircuit===key?' active':''}`} data-circuit={key} onClick={()=>onCircuitChange(key)}>{label}</button>
+        ))}
+      </div>
+      {/* Clock as rightmost flex item — no overlap with buttons */}
+      <div ref={clockRef} className="nav-clock">00:00:00 UTC</div>
+    </nav>
+  );
+}
+
+/* ── Hero ───────────────────────────────────────────────────────────────── */
+function Hero({circuit}){
+  useEffect(()=>{buildHeroScene(circuit);},[circuit]);
+  const c=CIRCUITS[circuit]||CIRCUITS['monaco'];
+  return(
+    <section id="hero">
+      <canvas id="hero-canvas"/>
+      <div id="hero-controls-badge">
+        <div className="ctrl-row"><span className="ctrl-key">DRAG</span><span className="ctrl-desc">Orbit camera</span></div>
+        <div className="ctrl-row"><span className="ctrl-key">SCROLL</span><span className="ctrl-desc">Zoom in / out</span></div>
+        <div className="ctrl-row"><span className="ctrl-key">RIGHT DRAG</span><span className="ctrl-desc">Pan view</span></div>
+        <div className="ctrl-row"><span className="ctrl-key">DBL CLICK</span><span className="ctrl-desc">Reset camera</span></div>
+      </div>
+      <div id="hero-controls-hint">
+        <div className="hint-pill"><span className="hint-icon">⟳</span>DRAG TO ORBIT</div>
+        <div className="hint-pill"><span className="hint-icon">⊕</span>SCROLL TO ZOOM</div>
+        <div className="hint-pill"><span className="hint-icon">✥</span>RIGHT DRAG TO PAN</div>
+      </div>
+      <div className="hero-ui">
+        <div>
+          <div className="hero-title">
+            <span className="t1">FORMULA ONE</span>
+            <span className="t2" id="hero-circuit-name">{c.name.toUpperCase()}</span>
+            <span className="t3" id="hero-circuit-sub">{c.city.toUpperCase()} · {c.length} KM · {c.laps} LAPS</span>
+          </div>
+        </div>
+        <div>
+          <div className="hero-stats">
+            <div className="hstat"><div className="hstat-val" id="stat-topspeed">{c.topSpeed}</div><div className="hstat-lbl">TOP SPEED km/h</div></div>
+            <div className="hstat"><div className="hstat-val" id="stat-corners">{c.corners}</div><div className="hstat-lbl">CORNERS</div></div>
+            <div className="hstat"><div className="hstat-val" id="stat-laprecord">{c.lapRecord}</div><div className="hstat-lbl">LAP RECORD</div></div>
+            <div className="hstat"><div className="hstat-val" id="stat-drs">{c.drs}</div><div className="hstat-lbl">DRS ZONES</div></div>
+          </div>
+          <div className="speed-legend">
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'9px',color:'rgba(255,255,255,.38)',letterSpacing:'.1em',marginBottom:'4px'}}>SPEED HEATMAP</div>
+            <div className="speed-grad-bar"/>
+            <div className="speed-grad-labels"><span>LOW</span><span>MED</span><span>HIGH</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ── Charts Section — FIX 3: paddingRight:72px clears toggle panel ────────── */
+function ChartsSection({circuit}){
+  const [compound,setCompound]=useState('soft');
+  const [vis,setVis]=useState({
+    'card-speed':true,'card-throttle':true,'card-brake':true,'card-bscatter':true,
+    'card-gforce':true,'card-tyre':true,'card-scatter3d':true,'card-radar':true,
+    'card-winprob':true,'card-features':true,'card-heatmap':true,'card-predict':true,
+  });
+  useEffect(()=>{setTimeout(()=>buildAllCharts(circuit),60);},[circuit]);
+  useEffect(()=>{setTimeout(()=>buildTyreScene(compound),60);},[compound]);
+  useEffect(()=>{
+    setTimeout(()=>buildScatterScene(),100);
+    setTimeout(()=>{
+      if(window.gsap&&window.ScrollTrigger){
+        gsap.registerPlugin(ScrollTrigger);
+        document.querySelectorAll('.chart-card').forEach(card=>{
+          gsap.fromTo(card,{opacity:0,rotateY:42,rotateX:-12,z:-100,transformOrigin:'center center -50px'},{opacity:1,rotateY:0,rotateX:0,z:0,duration:.85,ease:'power3.out',scrollTrigger:{trigger:card,start:'top 88%',toggleActions:'play none none reverse'}});
+        });
+      }
+    },250);
+  },[]);
+  function toggle(t){setVis(p=>({...p,[t]:!p[t]}));}
+  const TOGS=[{t:'card-speed',l:'SPD'},{t:'card-throttle',l:'THR'},{t:'card-brake',l:'BRK'},{t:'card-bscatter',l:'BSC'},{t:'card-gforce',l:'GFC'},{t:'card-tyre',l:'TYR'},{t:'card-scatter3d',l:'CLU'},{t:'card-radar',l:'RDR'},{t:'card-winprob',l:'WIN'},{t:'card-features',l:'FTR'},{t:'card-heatmap',l:'HMT'},{t:'card-predict',l:'PRD'}];
+  const CMP=[['soft','#ff2222'],['medium','#f5e642'],['hard','#eee'],['inter','#39ff14'],['wet','#00f5ff']];
+  function Card({id,span,label,title,children,hidden}){
+    return(<div className={`chart-card ${span}`} id={id} style={hidden?{display:'none'}:undefined}><div className="cc tl"/><div className="cc tr"/><div className="cc bl"/><div className="cc br"/><div className="card-label">{label}</div><div className="card-title">{title}</div>{children}</div>);
+  }
+  return(
+    <>
+      <div id="toggle-panel">
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'8px',color:'rgba(255,255,255,.28)',textAlign:'center',letterSpacing:'.08em',paddingBottom:'4px'}}>VIS</div>
+        {TOGS.map(({t,l})=><button key={t} className={`tog-btn${vis[t]?' active':''}`} title={l} onClick={()=>toggle(t)}>{l}</button>)}
+      </div>
+      <section id="charts-section" style={{paddingRight:'72px'}}>
+        <div className="section-header"><div className="section-tag">◈ TELEMETRY ANALYTICS</div><div className="section-title">Race Data Intelligence</div></div>
+        <div className="charts-grid">
+          <Card id="card-speed" span="span-8" label="CHART 01 · TELEMETRY" title="Speed vs Distance" hidden={!vis['card-speed']}><canvas className="chart-canvas" id="chartSpeed"/></Card>
+          <Card id="card-throttle" span="span-4" label="CHART 02 · INPUT" title="Throttle Application %" hidden={!vis['card-throttle']}><canvas className="chart-canvas" id="chartThrottle"/></Card>
+          <Card id="card-brake" span="span-4" label="CHART 03 · INPUT" title="Brake Pressure" hidden={!vis['card-brake']}><canvas className="chart-canvas" id="chartBrake"/></Card>
+          <Card id="card-bscatter" span="span-4" label="CHART 04 · EVENTS" title="Brake Event Scatter" hidden={!vis['card-bscatter']}><canvas className="chart-canvas" id="chartBrakeScatter"/></Card>
+          <Card id="card-gforce" span="span-4" label="CHART 05 · DYNAMICS" title="G-Force Analysis" hidden={!vis['card-gforce']}><canvas className="chart-canvas" id="chartGforce"/></Card>
+          <Card id="card-tyre" span="span-8" label="CHART 06 · STRATEGY" title="Tyre Strategy — 3D Live Compound" hidden={!vis['card-tyre']}>
+            <div style={{display:'flex',gap:'6px',marginBottom:'10px'}}>
+              {CMP.map(([c,col])=><button key={c} className={`compound-btn${compound===c?' active':''}`} style={{borderColor:col,color:col,background:compound===c?`${col}18`:undefined}} onClick={()=>setCompound(c)}>{c.toUpperCase()}</button>)}
+            </div>
+            <div id="tyre-layout"><canvas id="tyre-canvas" width="170" height="170"/><div id="tyre-strat-wrap"><canvas id="chartTyreStrat" style={{width:'100%',height:'100%'}}/></div></div>
+          </Card>
+          <Card id="card-scatter3d" span="span-6" label="CHART 07 · CLUSTERING" title="Circuit Cluster 3D Scatter" hidden={!vis['card-scatter3d']}><canvas id="scatter3d-canvas" style={{width:'100%',height:'250px',display:'block'}}/></Card>
+          <Card id="card-radar" span="span-6" label="CHART 08 · PROFILE" title="Circuit Profile Radar" hidden={!vis['card-radar']}><canvas className="chart-canvas" id="chartRadar" style={{maxHeight:'270px'}}/></Card>
+          <Card id="card-winprob" span="span-6" label="CHART 09 · PROBABILITY" title="Win Probability — Constructors" hidden={!vis['card-winprob']}><canvas className="chart-canvas" id="chartWinProb"/></Card>
+          <Card id="card-features" span="span-6" label="CHART 10 · BREAKDOWN" title="Driver Feature Breakdown" hidden={!vis['card-features']}><canvas className="chart-canvas" id="chartFeatures"/></Card>
+          <Card id="card-heatmap" span="span-12" label="CHART 11 · PERFORMANCE" title="Driver Performance Heatmap" hidden={!vis['card-heatmap']}><div className="heatmap-grid" id="heatmap-grid"/></Card>
+          <Card id="card-predict" span="span-5" label="CHART 12 · PREDICTION" title="Race Prediction Confidence" hidden={!vis['card-predict']}><div className="pred-list" id="pred-list"/></Card>
+          <Card id="card-points" span="span-7" label="BONUS · SEASON DATA" title="Championship Points Progression"><canvas className="chart-canvas" id="chartPoints"/></Card>
+        </div>
+      </section>
+    </>
+  );
+}
+
+/* ── ML Section — also padded right ─────────────────────────────────────── */
+function MLSection(){
+  const [circuit,setCircuit]=useState('monaco');
+  const [year,setYear]=useState('2023');
+  const [cond,setCond]=useState('dry');
+  const [algo,setAlgo]=useState('RF');
+  function runModel(){
+    const c=CIRCUITS[circuit];
+    const BP={Verstappen:.32,Hamilton:.19,Leclerc:.21,Norris:.14,Alonso:.13,Russell:.11,Sainz:.10,'Pérez':.09};
+    const YF={2023:1.0,2022:.95,2021:.91,2020:.88,2019:.85};
+    const CM={dry:{},wet:{Hamilton:.08,Alonso:.06},mixed:{Leclerc:.04}};
+    const AN={RF:.04,LR:.08,GB:.03};
+    const yf=YF[+year]||1,mod=CM[cond]||{},noise=AN[algo];
+    let probs=ALL_DRIVERS.map(d=>({driver:d,prob:Math.max(.01,(BP[d]||.09)*(yf+rand(-.04,.04))+(mod[d]||0)+rand(-noise,noise))}));
+    const tot=probs.reduce((s,p)=>s+p.prob,0);
+    probs=probs.map(p=>({...p,prob:p.prob/tot})).sort((a,b)=>b.prob-a.prob);
+    const list=document.getElementById('ml-pred-list');if(list){list.innerHTML='';const bc=['#f5e642','rgba(255,255,255,.65)','#ff6b00','#00f5ff','#39ff14','#bf5fff','#ff0090','#ff6b00'];probs.slice(0,6).forEach((p,i)=>{const pct=(p.prob*100).toFixed(1);const item=document.createElement('div');item.className='pred-item';item.innerHTML=`<div class="pred-pos ${i<3?'p'+(i+1):''}">${i+1}</div><div class="pred-driver"><div class="pred-name">${p.driver}</div></div><div class="pred-bar-wrap"><div class="pred-bar" style="width:0%;background:${bc[i]}" data-pct="${pct}"></div></div><div class="pred-pct" style="color:${bc[i]}">${pct}%</div>`;list.appendChild(item);});setTimeout(()=>list.querySelectorAll('.pred-bar').forEach(b=>b.style.width=b.dataset.pct+'%'),100);}
+    const laps=Array.from({length:c.laps},(_,i)=>i+1);
+    const top3=probs.slice(0,3);
+    const lapData=top3.map(p=>{let prob=p.prob;return laps.map((_,li)=>{prob+=rand(-.016,.016)*(1-li/c.laps*.5);if(li===Math.floor(c.laps*.38))prob+=rand(-.04,.04);return+(Math.max(.02,Math.min(.62,prob))*100).toFixed(2);});});
+    buildMLChart(laps,top3,lapData);
+    const acc={RF:'94.2',LR:'88.7',GB:'95.1'}[algo];
+    const m=document.getElementById('ml-metrics');if(m)m.innerHTML=`<div class="hstat"><div class="hstat-val" style="font-size:19px">${acc}%</div><div class="hstat-lbl">MODEL ACCURACY</div></div><div class="hstat"><div class="hstat-val" style="font-size:19px;color:var(--ny)">${algo}</div><div class="hstat-lbl">ALGORITHM</div></div><div class="hstat"><div class="hstat-val" style="font-size:19px;color:var(--ng)">${c.laps}</div><div class="hstat-lbl">RACE LAPS</div></div><div class="hstat"><div class="hstat-val" style="font-size:19px;color:var(--no)">${cond.toUpperCase()}</div><div class="hstat-lbl">CONDITIONS</div></div><div class="hstat"><div class="hstat-val" style="font-size:19px;color:var(--npu)">${year}</div><div class="hstat-lbl">SEASON YEAR</div></div><div class="hstat"><div class="hstat-val" style="font-size:19px;color:var(--np)">${probs[0].driver}</div><div class="hstat-lbl">PREDICTED WINNER</div></div>`;
+  }
+  useEffect(()=>{setTimeout(runModel,400);},[]);
+  return(
+    <section id="ml-section" style={{padding:'60px 72px 60px 36px',maxWidth:'1580px',margin:'0 auto'}}>
+      <div className="section-header"><div className="section-tag">◈ MACHINE LEARNING ENGINE</div><div className="section-title">Lap-by-Lap Win Probability Tracker</div></div>
+      <div className="chart-card" id="card-ml" style={{padding:'26px'}}>
+        <div className="cc tl"/><div className="cc tr"/><div className="cc bl"/><div className="cc br"/>
+        <div className="card-label">CHART 13 · ML ENGINE</div>
+        <div className="card-title" style={{marginBottom:0}}>Race Win Probability Tracker</div>
+        <div className="ml-controls" style={{marginTop:'14px'}}>
+          <select className="ml-select" value={circuit} onChange={e=>setCircuit(e.target.value)}>
+            {['monaco','silverstone','monza','spa','suzuka'].map(k=><option key={k} value={k}>{k.charAt(0).toUpperCase()+k.slice(1)}</option>)}
+          </select>
+          <select className="ml-select" value={year} onChange={e=>setYear(e.target.value)}>
+            {['2023','2022','2021','2020','2019'].map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+          <select className="ml-select" value={cond} onChange={e=>setCond(e.target.value)}>
+            {['dry','wet','mixed'].map(c=><option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
+          </select>
+          {['RF','LR','GB'].map(a=><button key={a} className={`algo-btn${algo===a?' active':''}`} onClick={()=>setAlgo(a)}>{{RF:'Random Forest',LR:'Logistic Reg.',GB:'Gradient Boost'}[a]}</button>)}
+          <button className="ml-btn" onClick={runModel}>▶ RUN MODEL</button>
+        </div>
+        <div id="ml-result" style={{display:'flex',gap:'20px',flexWrap:'wrap',alignItems:'flex-start',marginTop:'4px'}}>
+          <div style={{flex:1,minWidth:'260px'}}>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'9px',color:'rgba(255,255,255,.38)',letterSpacing:'.12em',marginBottom:'8px'}}>PREDICTED ORDER</div>
+            <div id="ml-pred-list" className="pred-list"/>
+          </div>
+          <div style={{flex:2,minWidth:'300px'}}>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'9px',color:'rgba(255,255,255,.38)',letterSpacing:'.12em',marginBottom:'8px'}}>LAP-BY-LAP WIN PROBABILITY</div>
+            <div style={{height:'260px'}}><canvas id="chartMLLap"/></div>
+          </div>
+        </div>
+        <div id="ml-metrics" style={{display:'flex',gap:'22px',marginTop:'14px',flexWrap:'wrap',paddingTop:'14px',borderTop:'1px solid rgba(255,255,255,.06)'}}/>
+      </div>
+    </section>
+  );
+}
+
+/* ── App root ────────────────────────────────────────────────────────────── */
+function App(){
+  const [activeCircuit,setActiveCircuit]=useState('monaco');
+  useEffect(()=>{
+    const glow=document.getElementById('cursor-glow'),dot=document.getElementById('cursor-dot');if(!glow||!dot)return;
+    let mx=0,my=0,gx=0,gy=0;
+    const onMove=e=>{mx=e.clientX;my=e.clientY;dot.style.left=mx+'px';dot.style.top=my+'px';};
+    const onDown=()=>dot.style.transform='translate(-50%,-50%) scale(.55)';
+    const onUp=()=>dot.style.transform='translate(-50%,-50%) scale(1)';
+    document.addEventListener('mousemove',onMove);document.addEventListener('mousedown',onDown);document.addEventListener('mouseup',onUp);
+    let raf;(function loop(){gx+=(mx-gx)*.07;gy+=(my-gy)*.07;glow.style.left=gx+'px';glow.style.top=gy+'px';raf=requestAnimationFrame(loop);})();
+    return()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mousedown',onDown);document.removeEventListener('mouseup',onUp);cancelAnimationFrame(raf);};
+  },[]);
+  useEffect(()=>{
+    window.addEventListener('resize',()=>{if(window.heroRenderer){const cv=document.getElementById('hero-canvas');if(cv){heroCamera.aspect=cv.clientWidth/cv.clientHeight;heroCamera.updateProjectionMatrix();heroRenderer.setSize(cv.clientWidth,cv.clientHeight);}}} );
+  },[]);
+  return(
+    <>
+      <div id="cursor-glow"/><div id="cursor-dot"/>
+      <Loader/>
+      <div id="data-stream"/>
+      <Navbar activeCircuit={activeCircuit} onCircuitChange={setActiveCircuit}/>
+      <Hero circuit={activeCircuit}/>
+      <ChartsSection circuit={activeCircuit}/>
+      <MLSection/>
+      <footer>
+        <div className="footer-logo">F1<span>APEX</span></div>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'10px',color:'rgba(255,255,255,.25)'}}>ANALYTICS DASHBOARD · DATA: KAGGLE F1 DATASET · TELEMETRY: FASTF1 SIMULATION</div>
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'10px',color:'rgba(255,255,255,.18)'}}>◈ 26,759 RACE RESULTS · 1,125 RACES</div>
+      </footer>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
